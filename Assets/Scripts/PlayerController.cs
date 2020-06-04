@@ -89,7 +89,7 @@ public struct FinishedTag : IComponentData { }
 class PlayerControllerSystem : SystemBase
 {
     private BuildPhysicsWorld _BuildPhysicsWorld;
-    private float2 _ViewportSize;
+    //private float2 _ViewportSize;
 
     protected override void OnCreate()
     {
@@ -180,7 +180,7 @@ class PlayerControllerSystem : SystemBase
 
         var deltaTime = Time.DeltaTime;
         var mousePosition = UnityEngine.Input.mousePosition;
-        var viewPost = _ViewportSize;
+        var viewPort = new float2(UnityEngine.Screen.width, UnityEngine.Screen.height);
         var collisionWorld = _BuildPhysicsWorld.PhysicsWorld.CollisionWorld;
 
         Entities.WithReadOnly(collisionWorld).ForEach((Entity entity, ref OverviewMode overview, in PlayerMovementState state) =>
@@ -191,25 +191,31 @@ class PlayerControllerSystem : SystemBase
                 commandBuffer.RemoveComponent<OverviewMode>(entity);
             }
 
-            if (viewPost.x <= 0 || viewPost.y <= 0)
-                return;
-
-            // ===!WORK IN PROGRESS!===
-
-            var normMouseX = mousePosition.x / viewPost.x;
-            var normMouseY = mousePosition.y / viewPost.y;
+            var normMouseX = mousePosition.x / viewPort.x;
+            var normMouseY = mousePosition.y / viewPort.y;
 
             var rtsMove = new float3();
 
             if (normMouseX < state.RTSCameraFrameWidth)
             {
-                var normMouseXInFrame = (1 - normMouseX) / state.RTSCameraFrameWidth;
+                var normMouseXInFrame = 1 - math.clamp(normMouseX / state.RTSCameraFrameWidth, 0, 1);
                 rtsMove.x = -normMouseXInFrame;
             }
             else if (normMouseX > (1 - state.RTSCameraFrameWidth))
             {
-                var normMouseXInFrame = normMouseX / state.RTSCameraFrameWidth;
+                var normMouseXInFrame = 1 - math.clamp((1 - normMouseX) / state.RTSCameraFrameWidth, 0, 1);
                 rtsMove.x = normMouseXInFrame;
+            }
+
+            if (normMouseY < state.RTSCameraFrameWidth)
+            {
+                var normMouseXInFrame = 1 - math.clamp(normMouseY / state.RTSCameraFrameWidth, 0, 1);
+                rtsMove.z = -normMouseXInFrame;
+            }
+            else if (normMouseY > (1 - state.RTSCameraFrameWidth))
+            {
+                var normMouseXInFrame = 1 - math.clamp((1 - normMouseY) / state.RTSCameraFrameWidth, 0, 1);
+                rtsMove.z = normMouseXInFrame;
             }
 
             overview.GroundPosition += rtsMove * state.RTSCameraSpeed * deltaTime;
@@ -230,8 +236,6 @@ class PlayerControllerSystem : SystemBase
         {
             playerCamera.Camera.transform.position = overview.CameraPosition;
             playerCamera.Camera.transform.rotation = quaternion.LookRotation(new float3(0, -1, 0), new float3(0, 0, 1));
-
-            _ViewportSize = new float2(playerCamera.Camera.pixelWidth, playerCamera.Camera.pixelHeight);
 
         }).WithoutBurst().Run();
 
