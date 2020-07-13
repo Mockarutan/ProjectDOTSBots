@@ -12,13 +12,25 @@ public class SelectionUI : MonoBehaviour
 {
     public RectTransform Squre;
 
+    [NonSerialized]
+    public Vector2 StartPoint;
+    [NonSerialized]
+    public Vector2 EndPoint;
+
     private bool _Dragging;
     private Vector3 _Positon;
+
+    private void Start()
+    {
+        World.DefaultGameObjectInjectionWorld.GetOrCreateSystem<SelectionSystemDataPrep>().Selection = this;
+    }
 
     void Update()
     {
         if (_Dragging)
         {
+            EndPoint = Input.mousePosition;
+
             var mid = (Input.mousePosition + _Positon) / 2;
 
             mid.x -= Screen.width / 2;
@@ -36,6 +48,7 @@ public class SelectionUI : MonoBehaviour
             {
                 _Dragging = true;
                 _Positon = Input.mousePosition;
+                StartPoint = _Positon;
             }
         }
     }
@@ -44,6 +57,7 @@ public class SelectionUI : MonoBehaviour
 [UpdateInGroup(typeof(InitializationSystemGroup))]
 class SelectionSystemDataPrep : SystemBase
 {
+    public SelectionUI Selection;
     public RectTransform TestPoint;
 
     private EntityQuery _UnitQuery;
@@ -74,6 +88,29 @@ class SelectionSystemDataPrep : SystemBase
 
             var fullViewProj = (float4x4)(camera.projectionMatrix * camera.transform.worldToLocalMatrix);
 
+            var width = Screen.width;
+            var height = Screen.height;
+
+            var startPoint = Selection.StartPoint;
+            var endPoint = Selection.EndPoint;
+
+            startPoint.x /= width;
+            startPoint.y /= height;
+
+            endPoint.x /= width;
+            endPoint.y /= height;
+
+            startPoint *= 2f;
+            endPoint *= 2f;
+
+            startPoint.x -= 1;
+            startPoint.y -= 1;
+
+            endPoint.x -= 1;
+            endPoint.y -= 1;
+
+            var commandBuffer = _ECBSystem.CreateCommandBuffer().ToConcurrent();
+
             Entities.ForEach((Entity entity, int entityInQueryIndex, in LocalToWorld trans, in UnitData data) =>
             {
                 var positionV4 = new float4(trans.Position.x, trans.Position.y, trans.Position.z, 1);
@@ -82,18 +119,31 @@ class SelectionSystemDataPrep : SystemBase
 
                 var screenCoord = new float2(viewportPoint.x, viewportPoint.y);
 
+                var selected = screenCoord.x > startPoint.x && screenCoord.y > startPoint.y &&
+                                screenCoord.x < endPoint.x && screenCoord.y < endPoint.y;
+
+                var indication = 0f;
+                if (selected)
+                    indication = 1f;
+
+                commandBuffer.SetComponent(entityInQueryIndex, data.StatusIndicator, new UnitStatusIndicatorMaterialProperties
+                {
+                    Selected = indication
+                });
+
                 screenCoord /= 2f;
 
-                screenCoord.x = screenCoord.x * Screen.width;
-                screenCoord.y = screenCoord.y * Screen.height;
+                screenCoord.x = screenCoord.x * width;
+                screenCoord.y = screenCoord.y * height;
 
                 screenPositions[entityInQueryIndex] = new SelectionSystem.EntityWithScreenPoint
                 {
+                    Selected = selected,
                     Entity = entity,
                     ScreenPoint = screenCoord,
                 };
 
-            }).ScheduleParallel();
+            }).WithName("SELECTION").ScheduleParallel();
         }
 
         _ECBSystem.AddJobHandleForProducer(Dependency);
@@ -105,6 +155,7 @@ class SelectionSystem : SystemBase
 {
     public struct EntityWithScreenPoint
     {
+        public bool Selected;
         public Entity Entity;
         public float2 ScreenPoint;
     }
@@ -118,11 +169,18 @@ class SelectionSystem : SystemBase
 
     protected override void OnUpdate()
     {
-        for (int i = 0; i < _OnScreenDataBuffer.Length; i++)
+        if (_OnScreenDataBuffer.IsCreated)
         {
-            Debug.Log("_OnScreenDataBuffer: " + _OnScreenDataBuffer[i].ScreenPoint);
-        }
+            //var counter = 0;
+            //for (int i = 0; i < _OnScreenDataBuffer.Length; i++)
+            //{
+            //    if (_OnScreenDataBuffer[i].Selected)
+            //        counter++;
+            //}
 
-        _OnScreenDataBuffer.Dispose();
+            //Debug.Log(_OnScreenDataBuffer.Length + ", counter: " + counter);
+
+            _OnScreenDataBuffer.Dispose();
+        }
     }
 }

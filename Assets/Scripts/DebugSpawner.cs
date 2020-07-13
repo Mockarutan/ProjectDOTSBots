@@ -22,13 +22,8 @@ public class DebugSpawner : UnityEngine.MonoBehaviour, IConvertGameObjectToEntit
     {
         dstManager.World.GetOrCreateSystem<SelectionSystemDataPrep>().TestPoint = TestPoint;
 
-
-
         var convSettings = GameObjectConversionSettings.FromWorld(dstManager.World, conversionSystem.BlobAssetStore);
         var prefab = GameObjectConversionUtility.ConvertGameObjectHierarchy(ObjectToSpawn, convSettings);
-
-        var entities = new NativeArray<Entity>(Count, Allocator.TempJob);
-        dstManager.Instantiate(prefab, entities);
 
         var box = GetComponent<UnityEngine.BoxCollider>();
         var min = (transform.position + box.center) - box.size;

@@ -218,7 +218,7 @@ class PlayerControllerSystem : SystemBase
                 rtsMove.z = normMouseXInFrame;
             }
 
-            overview.GroundPosition += rtsMove * state.RTSCameraSpeed * deltaTime;
+            //overview.GroundPosition += rtsMove * state.RTSCameraSpeed * deltaTime;
 
             var start = overview.GroundPosition;
             var end = overview.GroundPosition;
