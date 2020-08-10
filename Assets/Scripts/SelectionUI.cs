@@ -5,12 +5,17 @@ using System.Xml;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
+using Unity.Physics;
+using Unity.Physics.Authoring;
+using Unity.Physics.Systems;
 using Unity.Transforms;
 using UnityEngine;
 
 public class SelectionUI : MonoBehaviour
 {
     public RectTransform Squre;
+    public float DoubleClickTime;
+    public PhysicsCategoryTags UnitPhysicsTag;
 
     [NonSerialized]
     public Vector2 StartPoint;
@@ -18,18 +23,39 @@ public class SelectionUI : MonoBehaviour
     public Vector2 EndPoint;
 
     public bool Dragging { get; private set; }
-    public Vector2 RightClick { get; private set; }
+    public Vector2? RightClick { get; private set; }
+    public Vector2? DoubleClick { get; private set; }
 
     private Vector3 _Positon;
+
+    private float _LastClickTime;
 
     private void Start()
     {
         World.DefaultGameObjectInjectionWorld.GetOrCreateSystem<SelectionSystemDataPrep>().Selection = this;
         World.DefaultGameObjectInjectionWorld.GetOrCreateSystem<UnitMovementSystem>().Selection = this;
+
+        var unitFilter = CollisionFilter.Default;
+        unitFilter.CollidesWith = UnitPhysicsTag.Value;
+
+        World.DefaultGameObjectInjectionWorld.GetOrCreateSystem<SelectionSystemDataPrep>().UnitFilter = unitFilter;
     }
 
     void Update()
     {
+        DoubleClick = null;
+        if (Input.GetMouseButtonUp(0))
+        {
+            if (Time.time - _LastClickTime < DoubleClickTime)
+            {
+                // Double Click
+                //Debug.Log("Double Click");
+                DoubleClick = Input.mousePosition;
+            }
+
+            _LastClickTime = Time.time;
+        }
+
         if (Dragging)
         {
             EndPoint = Input.mousePosition;
@@ -53,6 +79,8 @@ public class SelectionUI : MonoBehaviour
                 _Positon = Input.mousePosition;
                 StartPoint = _Positon;
             }
+
+            RightClick = null;
             if (Input.GetMouseButtonDown(1))
             {
                 RightClick = Input.mousePosition;
@@ -69,15 +97,19 @@ class SelectionSystemDataPrep : SystemBase
     public SelectionUI Selection;
     public RectTransform TestPoint;
 
+    public CollisionFilter UnitFilter;
+
     private EntityQuery _UnitQuery;
     private SelectionSystem _SelectionSystem;
     private EndInitializationEntityCommandBufferSystem _ECBSystem;
+    private BuildPhysicsWorld _BuildPhysicsWorld;
 
     protected override void OnCreate()
     {
         _UnitQuery = GetEntityQuery(typeof(UnitData));
         _SelectionSystem = World.GetOrCreateSystem<SelectionSystem>();
         _ECBSystem = World.GetOrCreateSystem<EndInitializationEntityCommandBufferSystem>();
+        _BuildPhysicsWorld = World.GetOrCreateSystem<BuildPhysicsWorld>();
     }
 
     protected override void OnUpdate()
@@ -147,6 +179,32 @@ class SelectionSystemDataPrep : SystemBase
             }).WithName("SELECTION").ScheduleParallel();
         }
 
+        var dobuleClicked = Selection.DoubleClick.HasValue;
+        if (dobuleClicked && Selection.RightClick.HasValue == false)
+        {
+            var doubleClickRay = camera.ScreenPointToRay(Selection.DoubleClick.Value);
+            var collisionWorld = _BuildPhysicsWorld.PhysicsWorld.CollisionWorld;
+
+            if (collisionWorld.CastRay(new RaycastInput { Start = doubleClickRay.origin, End = doubleClickRay.GetPoint(1000), Filter = UnitFilter }, out var hitInfo))
+            {
+                if (HasComponent<UnitData>(hitInfo.Entity))
+                {
+                    var isFlameBot = HasComponent<FlameBot>(hitInfo.Entity);
+                    var isLazerBot = HasComponent<LazerBot>(hitInfo.Entity);
+
+                    Entities.ForEach((Entity entity, ref UnitData data) =>
+                    {
+                        if (isFlameBot)
+                            data.Selected = HasComponent<FlameBot>(entity);
+
+                        if (isLazerBot)
+                            data.Selected = HasComponent<LazerBot>(entity);
+
+                    }).WithName("TYPE_SELECTION").ScheduleParallel();
+                }
+            }
+        }
+
         _ECBSystem.AddJobHandleForProducer(Dependency);
     }
 }
@@ -165,6 +223,9 @@ class SelectionSystem : SystemBase
 
     public void SetBuffer(NativeArray<EntityWithScreenPoint> buffer)
     {
+        if (_OnScreenDataBuffer.IsCreated)
+            _OnScreenDataBuffer.Dispose();
+
         _OnScreenDataBuffer = buffer;
     }
 

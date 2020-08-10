@@ -1,4 +1,5 @@
-﻿using System.Collections;
+﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Entities;
@@ -11,11 +12,17 @@ using Unity.Transforms;
 [UnityEngine.RequireComponent(typeof(UnityEngine.BoxCollider))]
 public class DebugSpawner : UnityEngine.MonoBehaviour, IConvertGameObjectToEntity
 {
+    [Serializable]
+    public class PrefabData
+    {
+        public int Count;
+        public UnityEngine.GameObject ObjectToSpawn;
+    }
+
     public UnityEngine.RectTransform TestPoint;
 
-    public int Count;
     public float Height;
-    public UnityEngine.GameObject ObjectToSpawn;
+    public PrefabData[] ObjectsToSpawn;
     public PhysicsCategoryTags GroundTag;
 
     public void Convert(Entity entity, EntityManager dstManager, GameObjectConversionSystem conversionSystem)
@@ -23,7 +30,19 @@ public class DebugSpawner : UnityEngine.MonoBehaviour, IConvertGameObjectToEntit
         dstManager.World.GetOrCreateSystem<SelectionSystemDataPrep>().TestPoint = TestPoint;
 
         var convSettings = GameObjectConversionSettings.FromWorld(dstManager.World, conversionSystem.BlobAssetStore);
-        var prefab = GameObjectConversionUtility.ConvertGameObjectHierarchy(ObjectToSpawn, convSettings);
+
+        var prefabBuffer = new NativeArray<SpawnData_Prefabs>(ObjectsToSpawn.Length, Allocator.TempJob);
+        for (int i = 0; i < ObjectsToSpawn.Length; i++)
+        {
+            var prefab = GameObjectConversionUtility.ConvertGameObjectHierarchy(ObjectsToSpawn[i].ObjectToSpawn, convSettings);
+            prefabBuffer[i] = new SpawnData_Prefabs
+            {
+                Prefab = prefab,
+                Count = ObjectsToSpawn[i].Count,
+            };
+        }
+        dstManager.AddBuffer<SpawnData_Prefabs>(entity).AddRange(prefabBuffer);
+        prefabBuffer.Dispose();
 
         var box = GetComponent<UnityEngine.BoxCollider>();
         var min = (transform.position + box.center) - box.size;
@@ -43,11 +62,9 @@ public class DebugSpawner : UnityEngine.MonoBehaviour, IConvertGameObjectToEntit
             CollidesWith = GroundTag.Value,
         };
 
-        var spawnerEntity = dstManager.CreateEntity();
-        dstManager.AddComponentData(spawnerEntity, new SpawnData
+        //var spawnerEntity = dstManager.CreateEntity();
+        dstManager.AddComponentData(entity, new SpawnData
         {
-            Count = Count,
-            Prefab = prefab,
             Random = fastRandom,
             Min = min,
             Max = max,
@@ -73,11 +90,15 @@ public class DebugSpawner : UnityEngine.MonoBehaviour, IConvertGameObjectToEntit
     }
 }
 
+struct SpawnData_Prefabs : IBufferElementData
+{
+    public Entity Prefab;
+    public int Count;
+}
+
 struct SpawnData : IComponentData
 {
-    public int Count;
-    public Entity Prefab;
-    public Random Random;
+    public Unity.Mathematics.Random Random;
 
     public float3 Min;
     public float3 Max;
@@ -102,29 +123,33 @@ class SpawnSystem : SystemBase
     {
         var collisionWorld = _BuildPhysicsWorld.PhysicsWorld.CollisionWorld;
 
-        Entities.ForEach((in SpawnData data) =>
+        Entities.ForEach((in SpawnData data, in DynamicBuffer<SpawnData_Prefabs> prefabs) =>
         {
-            var entities = new NativeArray<Entity>(data.Count, Allocator.TempJob);
-            EntityManager.Instantiate(data.Prefab, entities);
-
-            var random = data.Random;
-            for (int i = 0; i < entities.Length; i++)
+            var prefabsCopy = prefabs.ToNativeArray(Allocator.Temp);
+            for (int i = 0; i < prefabsCopy.Length; i++)
             {
-                var x = random.NextFloat(data.Min.x, data.Max.x);
-                var z = random.NextFloat(data.Min.z, data.Max.z);
+                var entities = new NativeArray<Entity>(prefabsCopy[i].Count, Allocator.TempJob);
+                EntityManager.Instantiate(prefabsCopy[i].Prefab, entities);
 
-                var start = new float3(x, data.Height, z);
-                var end = new float3(x, -data.Height, z);
-
-                if (collisionWorld.CastRay(new RaycastInput { Start = start, End = end, Filter = data.GroundFilter }, out var hitInfo))
+                var random = data.Random;
+                for (int k = 0; k < entities.Length; k++)
                 {
-                    EntityManager.SetComponentData(entities[i], new Translation { Value = hitInfo.Position });
-                }
-                else
-                    UnityEngine.Debug.LogError("NO GROUND!");
-            }
+                    var x = random.NextFloat(data.Min.x, data.Max.x);
+                    var z = random.NextFloat(data.Min.z, data.Max.z);
 
-            entities.Dispose();
+                    var start = new float3(x, data.Height, z);
+                    var end = new float3(x, -data.Height, z);
+
+                    if (collisionWorld.CastRay(new RaycastInput { Start = start, End = end, Filter = data.GroundFilter }, out var hitInfo))
+                    {
+                        EntityManager.SetComponentData(entities[k], new Translation { Value = hitInfo.Position });
+                    }
+                    else
+                        UnityEngine.Debug.LogError("NO GROUND!");
+                }
+
+                entities.Dispose();
+            }
         }).WithStructuralChanges().Run();
 
         EntityManager.DestroyEntity(_Query);

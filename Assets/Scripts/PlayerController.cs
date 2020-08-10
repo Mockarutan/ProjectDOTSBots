@@ -28,6 +28,7 @@ public class PlayerController : UnityEngine.MonoBehaviour, IConvertGameObjectToE
     public void Convert(Entity entity, EntityManager dstManager, GameObjectConversionSystem conversionSystem)
     {
         dstManager.AddComponent<ThirdPersonMode>(entity);
+        dstManager.AddComponent<LockRotationXZ>(entity);
 
         dstManager.AddComponentData(entity, new PlayerMovementState
         {
@@ -84,7 +85,7 @@ public class PlayerCamera : IComponentData
     public UnityEngine.Camera Camera;
 }
 
-public struct FinishedTag : IComponentData { }
+public struct LockRotationXZ : IComponentData { }
 
 class PlayerControllerSystem : SystemBase
 {
@@ -100,12 +101,12 @@ class PlayerControllerSystem : SystemBase
     {
         var commandBuffer = new EntityCommandBuffer(Allocator.TempJob);
 
-        Entities.WithNone<FinishedTag>().ForEach((Entity entity, ref PlayerMovementState state, ref Rotation rot, ref PhysicsMass physicsMass) =>
+        Entities.WithAll<LockRotationXZ>().ForEach((Entity entity, ref Rotation rot, ref PhysicsMass physicsMass) =>
         {
             physicsMass.InverseInertia = new float3(0, 1, 0);
             rot.Value = quaternion.identity;
 
-            commandBuffer.AddComponent<FinishedTag>(entity);
+            commandBuffer.RemoveComponent<LockRotationXZ>(entity);
 
         }).Run();
 
@@ -218,7 +219,7 @@ class PlayerControllerSystem : SystemBase
                 rtsMove.z = normMouseXInFrame;
             }
 
-            //overview.GroundPosition += rtsMove * state.RTSCameraSpeed * deltaTime;
+            overview.GroundPosition += rtsMove * state.RTSCameraSpeed * deltaTime;
 
             var start = overview.GroundPosition;
             var end = overview.GroundPosition;

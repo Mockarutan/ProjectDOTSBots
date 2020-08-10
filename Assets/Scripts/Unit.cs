@@ -5,14 +5,14 @@ using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Physics;
+using Unity.Physics.Authoring;
 using Unity.Physics.Systems;
 using Unity.Rendering;
 using Unity.Transforms;
-using UnityEngine;
 
-public class Unit : MonoBehaviour, IConvertGameObjectToEntity
+public class Unit : UnityEngine.MonoBehaviour, IConvertGameObjectToEntity
 {
-    public GameObject StatusIndicator;
+    public UnityEngine.GameObject StatusIndicator;
     public float ProximityDistance;
     public float TargetSpeed;
     public float AvoidSpeed;
@@ -23,6 +23,7 @@ public class Unit : MonoBehaviour, IConvertGameObjectToEntity
 
         dstManager.AddComponent<UnitStatusIndicatorMaterialProperties>(healthLight);
 
+        dstManager.AddComponent<LockRotationXZ>(entity);
         dstManager.AddComponentData(entity, new UnitData
         {
             StatusIndicator = healthLight,
@@ -36,6 +37,8 @@ public class Unit : MonoBehaviour, IConvertGameObjectToEntity
 struct UnitData : IComponentData
 {
     public Entity StatusIndicator;
+    public float3 TargetPosition;
+    public bool HasTargetPosition;
     public bool Selected;
     public float ProximityDistance;
     public float TargetSpeed;
@@ -112,7 +115,7 @@ class UnitMovementSystem : SystemBase
     {
         if (_Buckets.IsCreated)
         {
-            Camera camera = null;
+            UnityEngine.Camera camera = null;
             Entities.ForEach((in PlayerCamera playerCamera) =>
             {
                 camera = playerCamera.Camera;
@@ -123,15 +126,18 @@ class UnitMovementSystem : SystemBase
             var deltaTime = Time.DeltaTime;
             var transforms = GetComponentDataFromEntity<LocalToWorld>(true);
 
-            var rightClickRay = camera.ScreenPointToRay(Selection.RightClick);
             var rightClickWorldPos = new float3();
+            var rightClicked = Selection.RightClick.HasValue;
+            if (rightClicked)
+            {
+                var rightClickRay = camera.ScreenPointToRay(Selection.RightClick.Value);
 
-            var collisionWorld = _BuildPhysicsWorld.PhysicsWorld.CollisionWorld;
-            var groundHit = collisionWorld.CastRay(new RaycastInput { Start = rightClickRay.origin, End = rightClickRay.GetPoint(1000), Filter = CollisionFilter.Default }, out var hitInfo);
+                var collisionWorld = _BuildPhysicsWorld.PhysicsWorld.CollisionWorld;
+                var groundHit = collisionWorld.CastRay(new RaycastInput { Start = rightClickRay.origin, End = rightClickRay.GetPoint(1000), Filter = CollisionFilter.Default }, out var hitInfo);
+                rightClickWorldPos = hitInfo.Position;
+            }
 
-            rightClickWorldPos = hitInfo.Position;
-
-            Entities.WithReadOnly(buckets).WithReadOnly(transforms).ForEach((Entity entity, ref Translation pos, in LocalToWorld trans, in UnitData data) =>
+            Entities.WithReadOnly(buckets).WithReadOnly(transforms).ForEach((Entity entity, ref Translation pos, ref UnitData data, in LocalToWorld trans) =>
             {
                 var postion2D = new float2(trans.Position.x, trans.Position.z);
                 var bucketIndex = SpatialHelper.PositionToCellIndex(postion2D, UnitMovementPerpSystem.MapSize, UnitMovementPerpSystem.BucketSize, default);
@@ -147,7 +153,7 @@ class UnitMovementSystem : SystemBase
                 var leftUp = up - 1;
                 var leftDown = down - 1;
                 var rightUp = up + 1;
-                var rightDown = down - 1;
+                var rightDown = down + 1;
 
                 ProcessBucket(buckets, bucketIndex, entity, postion2D, proxDist, ref closestDistSqrd, ref closestEntity, transforms);
                 ProcessBucket(buckets, right, entity, postion2D, proxDist, ref closestDistSqrd, ref closestEntity, transforms);
@@ -159,10 +165,19 @@ class UnitMovementSystem : SystemBase
                 ProcessBucket(buckets, rightUp, entity, postion2D, proxDist, ref closestDistSqrd, ref closestEntity, transforms);
                 ProcessBucket(buckets, rightDown, entity, postion2D, proxDist, ref closestDistSqrd, ref closestEntity, transforms);
 
-                if (data.Selected && groundHit)
+                if (data.Selected && rightClicked)
                 {
-                    var direction = math.normalize(rightClickWorldPos - trans.Position);
-                    pos.Value += direction * data.TargetSpeed * deltaTime;
+                    data.HasTargetPosition = true;
+                    data.TargetPosition = rightClickWorldPos;
+                }
+
+                var newPos = pos.Value;
+                if (data.HasTargetPosition)
+                {
+                    var direction = math.normalize(data.TargetPosition - trans.Position);
+                    var movement = direction * data.TargetSpeed * deltaTime;
+                    newPos += movement;
+                    postion2D += new float2(movement.x, movement.z);
                 }
 
                 if (closestEntity != Entity.Null)
@@ -173,8 +188,10 @@ class UnitMovementSystem : SystemBase
                     var direction = math.normalize(postion2D - closestPostion2D);
                     var avoid2D = direction * data.AvoidSpeed * deltaTime;
                     var avoid3D = new float3(avoid2D.x, 0, avoid2D.y);
-                    pos.Value += avoid3D;
+                    newPos += avoid3D;
                 }
+
+                pos.Value = newPos;
 
             }).WithName("PROXIMITY").ScheduleParallel();
         }
