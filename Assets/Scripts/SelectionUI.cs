@@ -17,17 +17,20 @@ public class SelectionUI : MonoBehaviour
     [NonSerialized]
     public Vector2 EndPoint;
 
-    private bool _Dragging;
+    public bool Dragging { get; private set; }
+    public Vector2 RightClick { get; private set; }
+
     private Vector3 _Positon;
 
     private void Start()
     {
         World.DefaultGameObjectInjectionWorld.GetOrCreateSystem<SelectionSystemDataPrep>().Selection = this;
+        World.DefaultGameObjectInjectionWorld.GetOrCreateSystem<UnitMovementSystem>().Selection = this;
     }
 
     void Update()
     {
-        if (_Dragging)
+        if (Dragging)
         {
             EndPoint = Input.mousePosition;
 
@@ -40,17 +43,23 @@ public class SelectionUI : MonoBehaviour
             Squre.sizeDelta = Input.mousePosition - _Positon;
 
             if (Input.GetMouseButton(0) == false)
-                _Dragging = false;
+                Dragging = false;
         }
         else
         {
             if (Input.GetMouseButton(0))
             {
-                _Dragging = true;
+                Dragging = true;
                 _Positon = Input.mousePosition;
                 StartPoint = _Positon;
             }
+            if (Input.GetMouseButtonDown(1))
+            {
+                RightClick = Input.mousePosition;
+            }
         }
+
+        UnityHelp.SetActive(Squre, Dragging);
     }
 }
 
@@ -90,28 +99,23 @@ class SelectionSystemDataPrep : SystemBase
 
             var width = Screen.width;
             var height = Screen.height;
+            var screenSize = new Vector2(width, height);
+            var dragging = Selection.Dragging;
 
             var startPoint = Selection.StartPoint;
             var endPoint = Selection.EndPoint;
 
-            startPoint.x /= width;
-            startPoint.y /= height;
+            startPoint.x = ((startPoint.x / width) * 2f) - 1;
+            endPoint.x = ((endPoint.x / width) * 2f) - 1;
 
-            endPoint.x /= width;
-            endPoint.y /= height;
+            startPoint.y = ((startPoint.y / height) * 2f) - 1;
+            endPoint.y = ((endPoint.y / height) * 2f) - 1;
 
-            startPoint *= 2f;
-            endPoint *= 2f;
-
-            startPoint.x -= 1;
-            startPoint.y -= 1;
-
-            endPoint.x -= 1;
-            endPoint.y -= 1;
+            var selectRect = Rect.MinMaxRect(startPoint.x, startPoint.y, endPoint.x, endPoint.y);
 
             var commandBuffer = _ECBSystem.CreateCommandBuffer().ToConcurrent();
 
-            Entities.ForEach((Entity entity, int entityInQueryIndex, in LocalToWorld trans, in UnitData data) =>
+            Entities.ForEach((Entity entity, int entityInQueryIndex, ref UnitData data, in LocalToWorld trans) =>
             {
                 var positionV4 = new float4(trans.Position.x, trans.Position.y, trans.Position.z, 1);
                 var viewPos = math.mul(fullViewProj, positionV4);
@@ -119,17 +123,14 @@ class SelectionSystemDataPrep : SystemBase
 
                 var screenCoord = new float2(viewportPoint.x, viewportPoint.y);
 
-                var selected = screenCoord.x > startPoint.x && screenCoord.y > startPoint.y &&
-                                screenCoord.x < endPoint.x && screenCoord.y < endPoint.y;
+                if (dragging)
+                    data.Selected = selectRect.Contains(screenCoord);
 
-                var indication = 0f;
-                if (selected)
-                    indication = 1f;
+                //var indication = 0f;
+                //if (data.Selected)
+                //    indication = 1f;
 
-                commandBuffer.SetComponent(entityInQueryIndex, data.StatusIndicator, new UnitStatusIndicatorMaterialProperties
-                {
-                    Selected = indication
-                });
+                //materialProps.Selected = indication;
 
                 screenCoord /= 2f;
 
@@ -138,7 +139,7 @@ class SelectionSystemDataPrep : SystemBase
 
                 screenPositions[entityInQueryIndex] = new SelectionSystem.EntityWithScreenPoint
                 {
-                    Selected = selected,
+                    Selected = data.Selected,
                     Entity = entity,
                     ScreenPoint = screenCoord,
                 };
@@ -169,6 +170,25 @@ class SelectionSystem : SystemBase
 
     protected override void OnUpdate()
     {
+        var commandBuffer = new EntityCommandBuffer(Allocator.TempJob);
+        Entities.ForEach((Entity entity, in UnitData data) =>
+        {
+            float indication;
+            if (data.Selected)
+                indication = 1;
+            else
+                indication = 0;
+
+            commandBuffer.SetComponent(data.StatusIndicator, new UnitStatusIndicatorMaterialProperties
+            {
+                Selected = indication
+            });
+
+        }).Run();
+
+        commandBuffer.Playback(EntityManager);
+        commandBuffer.Dispose();
+
         if (_OnScreenDataBuffer.IsCreated)
         {
             //var counter = 0;

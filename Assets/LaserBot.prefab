@@ -213,6 +213,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   StatusIndicator: {fileID: 8042968343891866445}
+  ProximityDistance: 2
+  TargetSpeed: 2
+  AvoidSpeed: 3
 --- !u!114 &3806253464003614495
 MonoBehaviour:
   m_ObjectHideFlags: 0
