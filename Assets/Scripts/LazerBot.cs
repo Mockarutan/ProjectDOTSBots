@@ -8,4 +8,6 @@ using Unity.Entities;
 [GenerateAuthoringComponent]
 public struct LazerBot : IComponentData
 {
+    public Entity Lazer;
+    public Entity LazerBeam;
 }

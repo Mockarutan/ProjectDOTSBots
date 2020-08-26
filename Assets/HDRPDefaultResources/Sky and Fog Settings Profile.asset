@@ -50,11 +50,11 @@ MonoBehaviour:
     m_Value: 1000
     min: 0
   baseHeight:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 0
   maximumHeight:
-    m_OverrideState: 0
-    m_Value: 50
+    m_OverrideState: 1
+    m_Value: 80
   albedo:
     m_OverrideState: 1
     m_Value: {r: 0.7216981, g: 0.929359, b: 1, a: 1}
@@ -63,7 +63,7 @@ MonoBehaviour:
     showEyeDropper: 1
   meanFreePath:
     m_OverrideState: 1
-    m_Value: 200
+    m_Value: 100
     min: 1
   enableVolumetricFog:
     m_OverrideState: 1

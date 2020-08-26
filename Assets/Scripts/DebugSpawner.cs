@@ -106,7 +106,7 @@ struct SpawnData : IComponentData
     public CollisionFilter GroundFilter;
 }
 
-[UpdateAfter(typeof(BuildPhysicsWorld))]
+[UpdateAfter(typeof(ExportPhysicsWorld))]
 class SpawnSystem : SystemBase
 {
     private BuildPhysicsWorld _BuildPhysicsWorld;
@@ -142,7 +142,7 @@ class SpawnSystem : SystemBase
 
                     if (collisionWorld.CastRay(new RaycastInput { Start = start, End = end, Filter = data.GroundFilter }, out var hitInfo))
                     {
-                        EntityManager.SetComponentData(entities[k], new Translation { Value = hitInfo.Position });
+                        EntityManager.SetComponentData(entities[k], new Translation { Value = hitInfo.Position + new float3(0, 0.4f, 0) });
                     }
                     else
                         UnityEngine.Debug.LogError("NO GROUND!");

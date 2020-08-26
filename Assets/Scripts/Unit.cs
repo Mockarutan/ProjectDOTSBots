@@ -37,13 +37,17 @@ public class Unit : UnityEngine.MonoBehaviour, IConvertGameObjectToEntity
 struct UnitData : IComponentData
 {
     public Entity StatusIndicator;
+    public Entity TargetEntity;
     public float3 TargetPosition;
     public bool HasTargetPosition;
+    public bool HasTargetEntity;
     public bool Selected;
     public float ProximityDistance;
     public float TargetSpeed;
     public float AvoidSpeed;
 }
+struct TargetTag : IComponentData
+{ }
 
 [MaterialProperty("_Selected", MaterialPropertyFormat.Float)]
 struct UnitStatusIndicatorMaterialProperties : IComponentData
@@ -91,6 +95,7 @@ class UnitMovementSystem : SystemBase
 
     private NativeMultiHashMap<uint, Entity> _Buckets;
     private BuildPhysicsWorld _BuildPhysicsWorld;
+    private EndSimulationEntityCommandBufferSystem _ECBSystem;
 
     public void SetBucketBuffer(NativeMultiHashMap<uint, Entity> buckets)
     {
@@ -103,6 +108,7 @@ class UnitMovementSystem : SystemBase
     protected override void OnCreate()
     {
         _BuildPhysicsWorld = World.GetOrCreateSystem<BuildPhysicsWorld>();
+        _ECBSystem = World.GetOrCreateSystem<EndSimulationEntityCommandBufferSystem>();
     }
 
     protected override void OnDestroy()
@@ -127,17 +133,35 @@ class UnitMovementSystem : SystemBase
             var transforms = GetComponentDataFromEntity<LocalToWorld>(true);
 
             var rightClickWorldPos = new float3();
-            var rightClicked = Selection.RightClick.HasValue;
-            if (rightClicked)
+            var rightClickGround = false;
+
+            var targetClicked = false;
+            var targetEntity = Entity.Null;
+
+            if (Selection.RightClick.HasValue)
             {
                 var rightClickRay = camera.ScreenPointToRay(Selection.RightClick.Value);
 
+                var selectionData = GetSingleton<SelectionData>();
                 var collisionWorld = _BuildPhysicsWorld.PhysicsWorld.CollisionWorld;
-                var groundHit = collisionWorld.CastRay(new RaycastInput { Start = rightClickRay.origin, End = rightClickRay.GetPoint(1000), Filter = CollisionFilter.Default }, out var hitInfo);
-                rightClickWorldPos = hitInfo.Position;
+                if (collisionWorld.CastRay(new RaycastInput { Start = rightClickRay.origin, End = rightClickRay.GetPoint(1000), Filter = selectionData.TargetFilter }, out var hitInfo))
+                {
+                    if (HasComponent<TargetTag>(hitInfo.Entity))
+                    {
+                        targetClicked = true;
+                        targetEntity = hitInfo.Entity;
+                    }
+                    else
+                    {
+                        rightClickGround = true;
+                        rightClickWorldPos = hitInfo.Position;
+                    }
+                }
             }
 
-            Entities.WithReadOnly(buckets).WithReadOnly(transforms).ForEach((Entity entity, ref Translation pos, ref UnitData data, in LocalToWorld trans) =>
+            var commandBuffer = _ECBSystem.CreateCommandBuffer().ToConcurrent();
+
+            Entities.WithReadOnly(buckets).WithReadOnly(transforms).ForEach((Entity entity, int entityInQueryIndex, ref UnitData data, ref Rotation rot, in LocalToWorld trans) =>
             {
                 var postion2D = new float2(trans.Position.x, trans.Position.z);
                 var bucketIndex = SpatialHelper.PositionToCellIndex(postion2D, UnitMovementPerpSystem.MapSize, UnitMovementPerpSystem.BucketSize, default);
@@ -165,33 +189,90 @@ class UnitMovementSystem : SystemBase
                 ProcessBucket(buckets, rightUp, entity, postion2D, proxDist, ref closestDistSqrd, ref closestEntity, transforms);
                 ProcessBucket(buckets, rightDown, entity, postion2D, proxDist, ref closestDistSqrd, ref closestEntity, transforms);
 
-                if (data.Selected && rightClicked)
+                if (data.Selected)
                 {
-                    data.HasTargetPosition = true;
-                    data.TargetPosition = rightClickWorldPos;
+                    if (targetClicked)
+                    {
+                        data.HasTargetPosition = false;
+                        data.HasTargetEntity = true;
+                        data.TargetEntity = targetEntity;
+                    }
+                    else if (rightClickGround)
+                    {
+                        data.HasTargetEntity = false;
+                        data.HasTargetPosition = true;
+                        data.TargetPosition = rightClickWorldPos;
+                    }
                 }
 
-                var newPos = pos.Value;
+                var isLazerBot = HasComponent<LazerBot>(entity);
+                if (data.HasTargetEntity)
+                {
+                    if (isLazerBot)
+                    {
+                        var lazerBot = GetComponent<LazerBot>(entity);
+                        var targetTrans = GetComponent<LocalToWorld>(data.TargetEntity);
+                        var lazerTrans = GetComponent<LocalToWorld>(lazerBot.Lazer);
+                        var targetVec = targetTrans.Position - lazerTrans.Position;
+                        var normTargetDir = math.normalize(targetVec);
+
+                        var lazerBeamPos = GetComponent<Translation>(lazerBot.LazerBeam);
+                        var lazerBeamScale = GetComponent<NonUniformScale>(lazerBot.LazerBeam);
+                        lazerBeamPos.Value.z = math.length(targetVec) / 2;
+                        lazerBeamScale.Value.y = lazerBeamPos.Value.z;
+
+                        commandBuffer.SetComponent(entityInQueryIndex, lazerBot.LazerBeam, lazerBeamPos);
+                        commandBuffer.SetComponent(entityInQueryIndex, lazerBot.LazerBeam, lazerBeamScale);
+
+                        var lazerRot = quaternion.LookRotation(normTargetDir, new float3(0, 1, 0));
+                        commandBuffer.SetComponent(entityInQueryIndex, lazerBot.Lazer, new Rotation { Value = math.mul(math.inverse(rot.Value), lazerRot) });
+
+                        var flatDirection = MathUtilities.ProjectVectorOnPlane(new float3(0, 1, 0), normTargetDir);
+                        var unitRot = quaternion.LookRotation(flatDirection, new float3(0, 1, 0));
+                        rot.Value = unitRot;
+
+                        if (HasComponent<Disabled>(lazerBot.LazerBeam))
+                            commandBuffer.RemoveComponent<Disabled>(entityInQueryIndex, lazerBot.LazerBeam);
+                    }
+                }
+                else
+                {
+                    if (isLazerBot)
+                    {
+                        var lazerBot = GetComponent<LazerBot>(entity);
+                        if (HasComponent<Disabled>(lazerBot.LazerBeam) == false)
+                            commandBuffer.AddComponent<Disabled>(entityInQueryIndex, lazerBot.LazerBeam);
+                    }
+                }
+
+                var newPos = GetComponent<Translation>(entity);
                 if (data.HasTargetPosition)
                 {
                     var direction = math.normalize(data.TargetPosition - trans.Position);
-                    var movement = direction * data.TargetSpeed * deltaTime;
-                    newPos += movement;
-                    postion2D += new float2(movement.x, movement.z);
+                    if (math.lengthsq(direction) > 0.01f)
+                    {
+                        var movement = direction * data.TargetSpeed * deltaTime;
+                        newPos.Value += movement;
+                        postion2D += new float2(movement.x, movement.z);
+
+                        var flatDirection = MathUtilities.ProjectVectorOnPlane(new float3(0, 1, 0), direction);
+                        var unitRot = quaternion.LookRotation(flatDirection, new float3(0, 1, 0));
+                        rot.Value = unitRot;
+
+                        commandBuffer.SetComponent(entityInQueryIndex, entity, newPos);
+                    }
                 }
 
-                if (closestEntity != Entity.Null)
-                {
-                    var closestPosition = GetComponent<LocalToWorld>(closestEntity).Position;
-                    var closestPostion2D = new float2(closestPosition.x, closestPosition.z);
+                //if (closestEntity != Entity.Null)
+                //{
+                //    var closestPosition = GetComponent<LocalToWorld>(closestEntity).Position;
+                //    var closestPostion2D = new float2(closestPosition.x, closestPosition.z);
 
-                    var direction = math.normalize(postion2D - closestPostion2D);
-                    var avoid2D = direction * data.AvoidSpeed * deltaTime;
-                    var avoid3D = new float3(avoid2D.x, 0, avoid2D.y);
-                    newPos += avoid3D;
-                }
-
-                pos.Value = newPos;
+                //    var direction = math.normalize(postion2D - closestPostion2D);
+                //    var avoid2D = direction * data.AvoidSpeed * deltaTime;
+                //    var avoid3D = new float3(avoid2D.x, 0, avoid2D.y);
+                //    newPos += avoid3D;
+                //}
 
             }).WithName("PROXIMITY").ScheduleParallel();
         }

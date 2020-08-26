@@ -16,6 +16,7 @@ public class SelectionUI : MonoBehaviour
     public RectTransform Squre;
     public float DoubleClickTime;
     public PhysicsCategoryTags UnitPhysicsTag;
+    public PhysicsCategoryTags TargetPhysicsTag;
 
     [NonSerialized]
     public Vector2 StartPoint;
@@ -32,13 +33,22 @@ public class SelectionUI : MonoBehaviour
 
     private void Start()
     {
-        World.DefaultGameObjectInjectionWorld.GetOrCreateSystem<SelectionSystemDataPrep>().Selection = this;
-        World.DefaultGameObjectInjectionWorld.GetOrCreateSystem<UnitMovementSystem>().Selection = this;
+        var world = World.DefaultGameObjectInjectionWorld;
+        world.GetOrCreateSystem<SelectionSystemDataPrep>().Selection = this;
+        world.GetOrCreateSystem<UnitMovementSystem>().Selection = this;
 
         var unitFilter = CollisionFilter.Default;
         unitFilter.CollidesWith = UnitPhysicsTag.Value;
 
-        World.DefaultGameObjectInjectionWorld.GetOrCreateSystem<SelectionSystemDataPrep>().UnitFilter = unitFilter;
+        var targetFilter = CollisionFilter.Default;
+        targetFilter.CollidesWith = TargetPhysicsTag.Value;
+
+        var selectionDataEntity = world.EntityManager.CreateEntity();
+        world.EntityManager.AddComponentData(selectionDataEntity, new SelectionData
+        {
+            UnitFilter = unitFilter,
+            TargetFilter = targetFilter,
+        });
     }
 
     void Update()
@@ -91,13 +101,17 @@ public class SelectionUI : MonoBehaviour
     }
 }
 
+public struct SelectionData : IComponentData
+{
+    public CollisionFilter UnitFilter;
+    public CollisionFilter TargetFilter;
+}
+
 [UpdateInGroup(typeof(InitializationSystemGroup))]
 class SelectionSystemDataPrep : SystemBase
 {
     public SelectionUI Selection;
     public RectTransform TestPoint;
-
-    public CollisionFilter UnitFilter;
 
     private EntityQuery _UnitQuery;
     private SelectionSystem _SelectionSystem;
@@ -145,7 +159,7 @@ class SelectionSystemDataPrep : SystemBase
 
             var selectRect = Rect.MinMaxRect(startPoint.x, startPoint.y, endPoint.x, endPoint.y);
 
-            var commandBuffer = _ECBSystem.CreateCommandBuffer().ToConcurrent();
+            //var commandBuffer = _ECBSystem.CreateCommandBuffer().ToConcurrent();
 
             Entities.ForEach((Entity entity, int entityInQueryIndex, ref UnitData data, in LocalToWorld trans) =>
             {
@@ -185,7 +199,9 @@ class SelectionSystemDataPrep : SystemBase
             var doubleClickRay = camera.ScreenPointToRay(Selection.DoubleClick.Value);
             var collisionWorld = _BuildPhysicsWorld.PhysicsWorld.CollisionWorld;
 
-            if (collisionWorld.CastRay(new RaycastInput { Start = doubleClickRay.origin, End = doubleClickRay.GetPoint(1000), Filter = UnitFilter }, out var hitInfo))
+            var selectionData = GetSingleton<SelectionData>();
+
+            if (collisionWorld.CastRay(new RaycastInput { Start = doubleClickRay.origin, End = doubleClickRay.GetPoint(1000), Filter = selectionData.UnitFilter }, out var hitInfo))
             {
                 if (HasComponent<UnitData>(hitInfo.Entity))
                 {

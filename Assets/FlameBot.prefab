@@ -140,7 +140,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2448689192685097663, guid: 8eaf3d32096f53745acd6ab0ef4a9261, type: 3}
+  - {fileID: 2100000, guid: 5e1f78a8c5991d04087e48afdab9c5b8, type: 2}
   - {fileID: -762940994329903760, guid: 8eaf3d32096f53745acd6ab0ef4a9261, type: 3}
   - {fileID: -1440760789477639881, guid: 8eaf3d32096f53745acd6ab0ef4a9261, type: 3}
   m_StaticBatchInfo:
@@ -223,7 +223,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2448689192685097663, guid: 8eaf3d32096f53745acd6ab0ef4a9261, type: 3}
+  - {fileID: 2100000, guid: 5e1f78a8c5991d04087e48afdab9c5b8, type: 2}
   - {fileID: -762940994329903760, guid: 8eaf3d32096f53745acd6ab0ef4a9261, type: 3}
   - {fileID: -2256928597179772756, guid: 8eaf3d32096f53745acd6ab0ef4a9261, type: 3}
   m_StaticBatchInfo:
@@ -426,7 +426,7 @@ MonoBehaviour:
         CombineMode: 2
     m_BelongsTo:
       m_Override: 0
-      m_Value: 0100010000000000000000000000000000000000000000000000000000000000
+      m_Value: 0000010000000000000000000000000000000000000000000000000000000000
     m_CollidesWith:
       m_Override: 0
       m_Value: 0001010000000000000000000000000000000000000000000000000000000000
@@ -508,7 +508,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2448689192685097663, guid: 8eaf3d32096f53745acd6ab0ef4a9261, type: 3}
+  - {fileID: 2100000, guid: 5e1f78a8c5991d04087e48afdab9c5b8, type: 2}
   - {fileID: -762940994329903760, guid: 8eaf3d32096f53745acd6ab0ef4a9261, type: 3}
   m_StaticBatchInfo:
     firstSubMesh: 0
